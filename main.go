@@ -1,12 +1,41 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
-	"os"
-	"regexp"
-
 	"github.com/PuerkitoBio/goquery"
+	"os"
+	"strings"
 )
+
+type Entry struct {
+	Title          string       `json:"title,omitempty"`
+	Pronounciation string       `json:"pronounciation,omitempty"`
+	SenseGroups    []SenseGroup `json:"sense_groups,omitempty"`
+}
+
+type SenseGroup struct {
+	PartOfSpeech string  `json:"part_of_speech,omitempty"`
+	Senses       []Sense `json:"senses,omitempty"`
+	SubSenses    []Sense `json:"subsenses,omitempty"`
+}
+
+type Sense struct {
+	Iteration           string `json:"iteration,omitempty"`
+	TransivityStatement string `json:"transivity_statement,omitempty"`
+	WordForm            string `json:"word_form,omitempty"`
+	Definition          string `json:"definition,omitempty"`
+	ExampleGroups       []ExampleGroup
+}
+
+type ExampleGroup struct {
+	TransivityStatement string `json:"transivity_statement,omitempty"`
+	Example             string `json:"example,omitempty"`
+}
+
+type Example struct {
+	Text string `json:"text,omitempty"`
+}
 
 func main() {
 	lang := "english"
@@ -24,24 +53,59 @@ func main() {
 		os.Exit(1)
 	}
 
-	//title := strings.TrimSpace(doc.Find(".pageTitle").Text())
+	entries := []Entry{}
+	doc.Find(".entryPageContent").Each(func(i int, domEntryPageContent *goquery.Selection) {
 
-	doc.Find(".senseGroup").Each(func(i int, s *goquery.Selection) {
-		//partOfSpeech := s.Find(".partOfSpeechTitle .partOfSpeech").Text()
-		//fmt.Printf(" - %s\n", partOfSpeech)
+		senseGroups := []SenseGroup{}
+		domEntryPageContent.Find(".senseGroup").Each(func(i int, domSenseGroup *goquery.Selection) {
 
-		s.Find(".sense").Each(func(ii int, ss *goquery.Selection) {
-			//iteration := ss.Find(".iteration").Text()
-			def := ss.Find(".definition").Text()
+			senses := []Sense{}
+			domSenseGroup.Find(".sense").Each(func(ii int, domSense *goquery.Selection) {
+				senses = append(senses, getSense(domSense))
+			})
 
-			// Definitions with examples end with a colon, but we don't show them.
-			def = regexp.MustCompile(`:$`).ReplaceAllString(def, ".")
-			fmt.Println(def)
+			subSenses := []Sense{}
+			domSenseGroup.Find(".subsense").Each(func(ii int, domSubSense *goquery.Selection) {
+				subSenses = append(subSenses, getSense(domSubSense))
+			})
 
-			// ss.Find(".exampleGroup").Each(func(iii int, sss *goquery.Selection) {
-			// 	example := sss.Find(".example").Text()
-			// 	fmt.Println(example)
-			// })
+			senseGroups = append(senseGroups, SenseGroup{
+				PartOfSpeech: domSenseGroup.Find(".partOfSpeechTitle .partOfSpeech").Text(),
+				Senses:       senses,
+				SubSenses:    subSenses,
+			})
+		})
+
+		entries = append(entries, Entry{
+			Title:          domEntryPageContent.Find(".entryHeader > .definitionOf > em").Text(),
+			Pronounciation: domEntryPageContent.Find(".entryHeader > .headpron").Text(),
+			SenseGroups:    senseGroups,
 		})
 	})
+
+	b, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		fmt.Println("Error:", err)
+	}
+
+	os.Stdout.Write(b)
+}
+
+func getSense(node *goquery.Selection) Sense {
+
+	exampleGroups := []ExampleGroup{}
+	node.Find(".senseInnerWrapper .exampleGroup").Each(func(ii int, domExampleGroup *goquery.Selection) {
+		exampleGroups = append(exampleGroups, ExampleGroup{
+			TransivityStatement: strings.TrimSpace(domExampleGroup.Find(".transivityStatement").Text()),
+			Example:             strings.TrimSpace(domExampleGroup.Find(".example").Text()),
+		})
+	})
+
+	return Sense{
+		Iteration:           strings.TrimSpace(node.Find(".senseInnerWrapper > .iteration").Text()),
+		TransivityStatement: strings.TrimSpace(node.Find(".senseInnerWrapper > .transivityStatement").Text()),
+		WordForm:            strings.TrimSpace(node.Find(".senseInnerWrapper > .wordForm").Text()),
+		Definition:          strings.TrimSpace(node.Find(".senseInnerWrapper > .definition").Text()),
+		ExampleGroups:       exampleGroups,
+	}
 }
